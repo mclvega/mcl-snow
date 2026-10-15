@@ -471,7 +471,7 @@ iniciarBucle(
       render.dibujar(partida, app.g.look, !app.g.config.animacionesReducidas, dt);
       dibujarHud(partida, dt);
     } else {
-      ctx.fillStyle = '#1d2733';
+      ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, ancho, alto);
     }
     if (app.g.config.mostrarFps) {
