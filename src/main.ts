@@ -106,8 +106,16 @@ const GIRO_TACTIL = 0.0055;
 const zonaMirar = h('div', { class: 'zona-mirar' });
 controles.prepend(zonaMirar);
 
-/** Hace que un elemento gire la cámara al arrastrar; `alMover` recibe el desplazamiento desde el inicio. */
-function arrastrarParaMirar(el: HTMLElement, alEmpezar?: () => void, alMover?: (dx: number, dy: number, t: number) => void, alSoltar?: () => void) {
+/**
+ * Hace que un elemento gire la cámara al arrastrar. `alMover` recibe el desplazamiento desde el inicio
+ * y el de este movimiento; si devuelve `true`, el giro vertical de este movimiento no se aplica.
+ */
+function arrastrarParaMirar(
+  el: HTMLElement,
+  alEmpezar?: () => void,
+  alMover?: (dx: number, dy: number, t: number, my: number) => boolean | void,
+  alSoltar?: () => void,
+) {
   let toque = { id: -1, x: 0, y: 0, x0: 0, y0: 0, t0: 0 };
   el.addEventListener('pointerdown', (e) => {
     if (toque.id !== -1) return;
@@ -118,11 +126,12 @@ function arrastrarParaMirar(el: HTMLElement, alEmpezar?: () => void, alMover?: (
   });
   el.addEventListener('pointermove', (e) => {
     if (e.pointerId !== toque.id) return;
+    const my = e.clientY - toque.y;
+    const retener = alMover?.(e.clientX - toque.x0, e.clientY - toque.y0, performance.now() - toque.t0, my) === true;
     giroX += (e.clientX - toque.x) * GIRO_TACTIL * sensibilidad();
-    giroY += (e.clientY - toque.y) * GIRO_TACTIL * sensibilidad();
+    if (!retener) giroY += my * GIRO_TACTIL * sensibilidad();
     toque.x = e.clientX;
     toque.y = e.clientY;
-    alMover?.(e.clientX - toque.x0, e.clientY - toque.y0, performance.now() - toque.t0);
   });
   const soltar = (e: PointerEvent) => {
     if (e.pointerId !== toque.id) return;
@@ -139,20 +148,33 @@ const botonFuego = h('div', { class: 'fuego fuego-der', 'aria-label': 'Disparar 
 const botonFuegoIzq = h('div', { class: 'fuego fuego-izq', 'aria-label': 'Disparar', role: 'button' }, h('span', { text: '🔫' }));
 controles.append(botonFuego, botonFuegoIzq);
 let deslizoMira = false;
+/** Giro vertical retenido mientras el gesto todavía puede ser «deslizar arriba = mira». */
+let giroRetenido = 0;
+const ventanaMira = (dx: number, dy: number, t: number) => !deslizoMira && dy <= 0 && Math.abs(dx) < 50 && t < 450;
 arrastrarParaMirar(
   botonFuego,
   () => {
     fuegoTactil++;
     deslizoMira = false;
+    giroRetenido = 0;
     botonFuego.classList.add('activo');
   },
-  (dx, dy, t) => {
+  (dx, dy, t, my) => {
     // Deslizar hacia arriba rápido desde el botón: activa o quita la mira, una vez por toque.
-    if (!deslizoMira && dy < -55 && Math.abs(dx) < 50 && t < 450) {
-      deslizoMira = true;
-      zoomPendiente = true;
-      navigator.vibrate?.(15);
+    // Mientras el gesto puede serlo, la cámara no sube; así la mira no salta al activarla.
+    if (ventanaMira(dx, dy, t)) {
+      if (dy < -55) {
+        deslizoMira = true;
+        giroRetenido = 0;
+        zoomPendiente = true;
+        navigator.vibrate?.(15);
+      } else giroRetenido += my;
+      return true;
     }
+    // No era el gesto de la mira: se aplica lo retenido y se sigue apuntando con normalidad.
+    giroY += giroRetenido * GIRO_TACTIL * sensibilidad();
+    giroRetenido = 0;
+    return false;
   },
   () => {
     fuegoTactil--;
@@ -171,6 +193,16 @@ arrastrarParaMirar(
     botonFuegoIzq.classList.remove('activo');
   },
 );
+
+/** El botón de disparo indica si la mira está puesta y cómo quitarla. */
+const textoMira = botonFuego.querySelector('small')!;
+let miraMostrada = false;
+function actualizarBotonMira(zoom: boolean) {
+  if (zoom === miraMostrada) return;
+  miraMostrada = zoom;
+  botonFuego.classList.toggle('apuntando', zoom);
+  textoMira.textContent = zoom ? '⇡ quitar mira' : '⇡ mira';
+}
 
 document.body.append(h('button', { type: 'button', class: 'boton-pausa', 'aria-label': 'Pausa', text: '⏸', onclick: () => pausar() }));
 
@@ -523,6 +555,7 @@ iniciarBucle(
     armaPendiente = null;
     if (!c.disparar) partida.soltarGatillo();
     partida.actualizar(dt, c);
+    actualizarBotonMira(partida.zoom);
   },
   () => {
     const ahora = performance.now();
