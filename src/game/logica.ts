@@ -24,6 +24,8 @@ export interface Controles {
   asistido: boolean;
   /** Disparo automático cuando la mira está sobre un enemigo (modo simple de los shooters móviles). */
   autoDisparo: boolean;
+  /** Muerto: cambiar de aliado observado (1 = siguiente, -1 = anterior). */
+  observar?: 1 | -1 | 0;
 }
 
 export const controlesVacios = (): Controles => ({ x: 0, z: 0, giroX: 0, giroY: 0, disparar: false, saltar: false, recargar: false, arma: null, zoom: false, asistido: false, autoDisparo: false });
@@ -98,6 +100,9 @@ export class Partida {
   entreRondas = 0;
   ultimoGanador: Equipo | null = null;
   zoom = false;
+  /** Aliado cuya vista se sigue tras morir (modo espectador). */
+  observado: Soldado | null = null;
+  private muerteJugador = 0;
   retroceso = 0;
   terminada = false;
   pausada = false;
@@ -143,6 +148,8 @@ export class Partida {
     this.trazos = [];
     this.impactos = [];
     this.zoom = false;
+    this.observado = null;
+    this.muerteJugador = 0;
     const { aliados, enemigos } = Partida.equipos(this.ronda);
     const sct = spawns('ct');
     const st = spawns('t');
@@ -197,6 +204,7 @@ export class Partida {
 
     this.tiempoRonda -= dt;
     this.actualizarJugador(dt, c);
+    this.actualizarEspectador(dt, c.observar ?? 0);
     for (const s of this.soldados) {
       if (!s.vivo) {
         s.muerteT += dt;
@@ -259,6 +267,25 @@ export class Partida {
     moverCuerpo(j.cuerpo, dx, dz, dt, this.bloques);
 
     if (c.disparar || (c.autoDisparo && this.enemigoEnMira())) this.disparar(j);
+  }
+
+  /** Tras caer (1,5 s viendo tu cuerpo) se sigue la vista de un aliado vivo; se puede cambiar de aliado. */
+  private actualizarEspectador(dt: number, cambio: number) {
+    if (this.jugador.vivo) {
+      this.observado = null;
+      return;
+    }
+    this.muerteJugador += dt;
+    if (this.muerteJugador < 1.5) return;
+    const vivos = this.soldados.filter((s) => !s.esJugador && s.vivo && s.equipo === this.jugador.equipo);
+    const lista = vivos.length ? vivos : this.soldados.filter((s) => !s.esJugador && s.vivo);
+    if (!lista.length) {
+      this.observado = null;
+      return;
+    }
+    const i = this.observado ? lista.indexOf(this.observado) : -1;
+    if (i === -1) this.observado = lista[0];
+    else if (cambio) this.observado = lista[(i + cambio + lista.length) % lista.length];
   }
 
   /** Ayuda de apuntado: acerca la mira al enemigo visible más cercano al centro. */

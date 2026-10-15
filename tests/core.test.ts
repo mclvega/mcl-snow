@@ -85,6 +85,21 @@ describe('partida', () => {
     expect(p.rondasPerdidas).toBeGreaterThanOrEqual(MODOS.desafio.vidas);
   });
 
+  it('al morir se sigue la vista de un aliado vivo y se puede cambiar', () => {
+    const p = new Partida(() => MODOS.normal, { fin: () => undefined }, 5);
+    p.jugador.vivo = false;
+    p.jugador.vida = 0;
+    for (let i = 0; i < 100; i++) p.actualizar(PASO, controlesVacios());
+    const primero = p.observado;
+    expect(primero?.vivo).toBe(true);
+    expect(primero?.equipo).toBe('ct');
+    expect(primero?.esJugador).toBe(false);
+    const c = controlesVacios();
+    c.observar = 1;
+    p.actualizar(PASO, c);
+    expect(p.observado).not.toBe(primero);
+  });
+
   it('cambiar de arma y recargar', () => {
     const p = new Partida(() => MODOS.normal, { fin: () => undefined }, 3);
     const c = controlesVacios();

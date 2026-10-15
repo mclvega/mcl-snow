@@ -281,6 +281,10 @@ export class Render3D {
     return m;
   }
 
+  private ultimoObs: Soldado | null = null;
+  private yawObs = 0;
+  private pitchObs = 0;
+
   dibujar(p: Partida, look: Look, efectos: boolean, dt: number) {
     const clave = JSON.stringify(look);
     if (clave !== this.lookActual) {
@@ -301,15 +305,30 @@ export class Render3D {
 
     // Cámara: ojos del jugador; si ha muerto, una vista elevada desde donde cayó.
     const j = p.jugador;
+    const obs = !j.vivo ? p.observado : null;
     if (j.vivo) {
       this.camara.position.set(j.cuerpo.x, j.cuerpo.y + ALTURA_OJOS, j.cuerpo.z);
       this.camara.rotation.set(j.pitch, j.yaw, 0, 'YXZ');
+    } else if (obs) {
+      // Espectador: los ojos del aliado, con un suavizado para que los giros bruscos de la IA no mareen.
+      const suave = Math.min(1, dt * 12);
+      const da = Math.atan2(Math.sin(obs.yaw - this.yawObs), Math.cos(obs.yaw - this.yawObs));
+      if (this.ultimoObs !== obs) {
+        this.yawObs = obs.yaw;
+        this.pitchObs = obs.pitch;
+        this.ultimoObs = obs;
+      } else {
+        this.yawObs += da * suave;
+        this.pitchObs += (obs.pitch - this.pitchObs) * suave;
+      }
+      this.camara.position.set(obs.cuerpo.x, obs.cuerpo.y + ALTURA_OJOS, obs.cuerpo.z);
+      this.camara.rotation.set(this.pitchObs, this.yawObs, 0, 'YXZ');
     } else {
       this.camara.position.set(j.cuerpo.x + 2, j.cuerpo.y + 4.5, j.cuerpo.z + 2);
       this.camara.lookAt(j.cuerpo.x, 0, j.cuerpo.z);
     }
     // Mira: zoom ligero con cualquier arma y ×4 con la telescópica de la AWP.
-    const fov = p.zoom ? 75 / (ARMAS[j.arma].zoom ?? 1.4) : 75;
+    const fov = p.zoom && j.vivo ? 75 / (ARMAS[j.arma].zoom ?? 1.4) : 75;
     if (this.camara.fov !== fov) {
       this.camara.fov = fov;
       this.camara.updateProjectionMatrix();
@@ -317,7 +336,7 @@ export class Render3D {
 
     for (const s of p.soldados) {
       const m = this.modelo(s, look);
-      m.grupo.visible = !s.esJugador || !s.vivo;
+      m.grupo.visible = (!s.esJugador || !s.vivo) && s !== obs;
       if (!m.grupo.visible) continue;
       m.grupo.position.set(s.cuerpo.x, s.cuerpo.y, s.cuerpo.z);
       m.grupo.rotation.set(0, s.yaw + Math.PI, 0);
@@ -362,9 +381,9 @@ export class Render3D {
     this.renderer.render(this.escena, this.camara);
   }
 
-  /** Arma en primera persona: balanceo al andar, retroceso, recarga y fogonazo. */
+  /** Arma en primera persona: balanceo al andar, retroceso, recarga y fogonazo (del jugador o del aliado observado). */
   private dibujarVista(p: Partida, dt: number) {
-    const j = p.jugador;
+    const j = !p.jugador.vivo && p.observado ? p.observado : p.jugador;
     if (this.armaVista !== j.arma) {
       this.vista.clear();
       const arma = modeloArma(j.arma, true);
@@ -376,8 +395,9 @@ export class Render3D {
       this.armaVista = j.arma;
     }
     // Con la telescópica no se ve el arma; con la mira normal se centra (miras de hierro).
-    const telescopica = p.zoom && !!ARMAS[j.arma].zoom;
-    const ads = p.zoom && !telescopica;
+    const zoom = p.zoom && j.esJugador;
+    const telescopica = zoom && !!ARMAS[j.arma].zoom;
+    const ads = zoom && !telescopica;
     this.vista.visible = j.vivo && !telescopica;
     if (j.moviendose && j.cuerpo.enSuelo) this.balanceo += dt * 9;
     const recarga = j.recargando > 0 ? Math.sin(Math.min(1, j.recargando) * Math.PI) : 0;

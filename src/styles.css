@@ -166,3 +166,8 @@ input[type='text'] { font: inherit; padding: 12px; border-radius: 10px; border: 
 .botones-tactiles { right: max(12px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }.fuego small { white-space: nowrap; padding: 1px 6px; border-radius: 8px; background: rgb(0 0 0 / 0.45); }
 .fuego-der.apuntando { border-color: #4ad1ff; box-shadow: 0 0 0 3px rgb(74 209 255 / 0.35); }
 .fuego-der.apuntando small { color: #4ad1ff; opacity: 1; }
+/* Modo espectador: tras morir se sigue la vista de un aliado; flechas para cambiar. */
+.espectador { display: none; position: fixed; left: 50%; transform: translateX(-50%); bottom: max(18px, env(safe-area-inset-bottom)); gap: 12px; z-index: 3; }
+body.jugando.espectando .espectador { display: flex; }
+.espectador .btn { min-width: 64px; min-height: 48px; font-size: 20px; }
+body.espectando .fuego { opacity: 0.25; }

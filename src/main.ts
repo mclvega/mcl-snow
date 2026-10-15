@@ -67,6 +67,8 @@ let giroY = 0;
 let raton = false;
 let zoomPendiente = false;
 let armaPendiente: Arma | 'siguiente' | null = null;
+/** Espectador: cambio de aliado pedido (1 siguiente, -1 anterior). */
+let observarPendiente: 1 | -1 | 0 = 0;
 const sensibilidad = () => app.g.config.sensibilidad / 5;
 
 addEventListener('mousemove', (e) => {
@@ -80,6 +82,10 @@ lienzo3d.addEventListener('mousedown', (e) => {
     void lienzo3d.requestPointerLock();
     return;
   }
+  if (partida.observado) {
+    observarPendiente = e.button === 2 ? -1 : 1;
+    return;
+  }
   if (e.button === 0) raton = true;
   if (e.button === 2) zoomPendiente = true;
 });
@@ -87,6 +93,7 @@ addEventListener('mouseup', (e) => e.button === 0 && (raton = false));
 addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('wheel', (e) => partida && (armaPendiente = 'siguiente') && e.preventDefault(), { passive: false });
 addEventListener('keydown', (e) => {
+  if (partida?.observado && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) observarPendiente = e.key === 'ArrowRight' ? 1 : -1;
   const arma = ORDEN_ARMAS.find((a) => ARMAS[a].tecla === e.key);
   if (arma) armaPendiente = arma;
 });
@@ -202,6 +209,21 @@ function actualizarBotonMira(zoom: boolean) {
   miraMostrada = zoom;
   botonFuego.classList.toggle('apuntando', zoom);
   textoMira.textContent = zoom ? '⇡ quitar mira' : '⇡ mira';
+}
+
+/** Botones del modo espectador: cambiar de aliado observado. */
+const barraEspectador = h(
+  'div',
+  { class: 'espectador' },
+  h('button', { type: 'button', class: 'btn btn-secundario', 'aria-label': 'Aliado anterior', text: '◀', onclick: () => (observarPendiente = -1) }),
+  h('button', { type: 'button', class: 'btn btn-secundario', 'aria-label': 'Aliado siguiente', text: '▶', onclick: () => (observarPendiente = 1) }),
+);
+document.body.append(barraEspectador);
+let espectando = false;
+function actualizarEspectador(si: boolean) {
+  if (si === espectando) return;
+  espectando = si;
+  document.body.classList.toggle('espectando', si);
 }
 
 document.body.append(h('button', { type: 'button', class: 'boton-pausa', 'aria-label': 'Pausa', text: '⏸', onclick: () => pausar() }));
@@ -482,6 +504,12 @@ function dibujarHud(p: Partida, dt: number) {
     sombra(`Ganan los ${NOMBRE_EQUIPO[p.ultimoGanador]}`, cx, cy - 60, p.ultimoGanador === 'ct' ? '#7fd0ff' : '#ff9a5a');
     ctx.font = '15px system-ui, sans-serif';
     sombra(p.rondasPerdidas >= MODOS[app.g.config.dificultad].vidas ? 'Fin de la partida' : `Siguiente ronda: ${Partida.equipos(p.ronda + 1).enemigos} enemigos`, cx, cy - 28);
+  } else if (!j.vivo && p.observado) {
+    const o = p.observado;
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    sombra(`👁 ${o.nombre}`, cx, alto - (tactil ? 150 : 74), o.equipo === j.equipo ? '#7fd0ff' : '#ff9a5a');
+    ctx.font = '13px system-ui, sans-serif';
+    sombra(`✚ ${Math.ceil(o.vida)} · ${ARMAS[o.arma].nombre} · ${tactil ? '◀ ▶' : 'clic o ← →'} para cambiar`, cx, alto - (tactil ? 128 : 52));
   } else if (!j.vivo) {
     ctx.font = 'bold 22px system-ui, sans-serif';
     sombra('Has caído · tus aliados siguen luchando', cx, cy - 60, '#ff9a9a');
@@ -551,11 +579,14 @@ iniciarBucle(
     c.arma = armaPendiente ?? (entrada.pulsado('arma') ? 'siguiente' : null);
     c.asistido = tactil && app.g.config.apuntadoAsistido;
     c.autoDisparo = tactil && app.g.config.disparoAutomatico;
+    c.observar = observarPendiente;
+    observarPendiente = 0;
     zoomPendiente = false;
     armaPendiente = null;
     if (!c.disparar) partida.soltarGatillo();
     partida.actualizar(dt, c);
     actualizarBotonMira(partida.zoom);
+    actualizarEspectador(!!partida.observado);
   },
   () => {
     const ahora = performance.now();
