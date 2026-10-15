@@ -8,11 +8,11 @@ import { Entrada } from './core/input';
 import { iniciarBucle } from './core/loop';
 import { iniciarPantallaCompleta } from './fullscreen';
 import { controlesVacios, Partida } from './game/logica';
-import { Render3D } from './game/render3d';
+import type { Render3D } from './game/render3d';
+import { Rendimiento, tamanoSombras } from './rendimiento';
 import { agregarRecord, limpiarNombre } from './storage';
 import { panelConfiguracion } from './ui/configuracion';
 import { boton, h, mostrarPanel } from './ui/dom';
-import { pantallaPersonaje } from './ui/personaje';
 
 const hud = document.getElementById('lienzo') as HTMLCanvasElement;
 const ctx = hud.getContext('2d')!;
@@ -36,11 +36,17 @@ if (tactil) document.body.classList.add('tactil');
 
 let partida: Partida | null = null;
 let render: Render3D | null = null;
+/** El motor 3D (three.js) se descarga aparte: el menú aparece sin esperarlo. */
+let modulo3d: Promise<typeof import('./game/render3d')> | null = null;
+const cargar3d = () => (modulo3d ??= import('./game/render3d'));
 
 iniciarPantallaCompleta(() => app.g.config.pantallaCompleta);
 app.aplicarConfig();
 
 /* ---------- Tamaño ---------- */
+
+/** Calidad automática, límite de FPS y monitor `?perf`. */
+const rend = new Rendimiento(() => app.g.config.calidad, () => app.g.config.limiteFps, () => ajustar());
 
 let ancho = innerWidth;
 let alto = innerHeight;
@@ -55,7 +61,7 @@ function ajustar() {
   hud.width = Math.round(ancho * dpr);
   hud.height = Math.round(alto * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  render?.ajustar(ancho, alto, Math.min(dpr, 1.5));
+  render?.ajustar(ancho, alto, rend.ratio);
 }
 addEventListener('resize', ajustar);
 ajustar();
@@ -281,7 +287,7 @@ function menu() {
       h('p', { class: 'texto-suave', text: `¡Hola, ${app.nombre()}! · Mejor: ${app.g.records[0]?.rondas ?? 0} rondas` }),
       boton('Jugar', jugar, { variante: 'primario', icono: '▶' }),
       boton(`Dificultad: ${MODOS[app.g.config.dificultad].nombre}`, () => configuracion(), { icono: '🎯' }),
-      boton('Personaje', () => pantallaPersonaje(menu), { icono: '👕' }),
+      boton('Personaje', () => void import('./ui/personaje').then((m) => m.pantallaPersonaje(menu)), { icono: '👕' }),
       boton('Récords', records, { icono: '🏆' }),
       boton('Configuración', () => configuracion(), { icono: '⚙️' }),
       h('p', { class: 'texto-suave ayuda-texto', text: AYUDA }),
@@ -309,8 +315,9 @@ let marcaAcierto = 0;
 let marcaCabeza = false;
 let marcaDano = 0;
 
-function jugar() {
+async function jugar() {
   audio.iniciar();
+  const { Render3D } = await cargar3d();
   partida = new Partida(
     () => MODOS[app.g.config.dificultad],
     {
@@ -560,7 +567,7 @@ function dibujarRadar(p: Partida) {
 let fps = 60;
 let ultimo = performance.now();
 iniciarBucle(
-  (dt) => {
+  (dt) => rend.medir('logica', () => {
     entrada.actualizar();
     if (!partida || partida.pausada) {
       giroX = giroY = 0;
@@ -587,14 +594,16 @@ iniciarBucle(
     partida.actualizar(dt, c);
     actualizarBotonMira(partida.zoom);
     actualizarEspectador(!!partida.observado);
-  },
+  }),
   () => {
     const ahora = performance.now();
+    if (!rend.debeDibujar(ahora, !partida || partida.pausada)) return;
     const dt = Math.min(0.1, (ahora - ultimo) / 1000);
     fps = fps * 0.9 + (1 / Math.max(0.001, dt)) * 0.1;
     ultimo = ahora;
     if (partida && render) {
-      render.dibujar(partida, app.g.look, !app.g.config.animacionesReducidas, dt);
+      render.sombras(tamanoSombras(app.g.config.calidad));
+      rend.medir('render', () => render!.dibujar(partida!, app.g.look, !app.g.config.animacionesReducidas, dt));
       dibujarHud(partida, dt);
     } else {
       ctx.fillStyle = '#000';
@@ -605,13 +614,17 @@ iniciarBucle(
       ctx.font = '11px monospace';
       ctx.fillText(`${Math.round(fps)} FPS`, 8, alto - 8);
     }
+    rend.actualizarMonitor(render?.renderer ?? null);
   },
 );
 
-if (import.meta.env.DEV && location.search.includes('demo')) jugar();
+if (import.meta.env.DEV && location.search.includes('demo')) void jugar();
 else if (app.g.nombre) menu();
 else bienvenida();
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => undefined));
 }
+
+// Con el menú ya visible, se descarga el motor 3D en segundo plano para que «Jugar» sea instantáneo.
+addEventListener('load', () => setTimeout(() => void cargar3d(), 800));

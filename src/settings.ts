@@ -1,3 +1,4 @@
+import { CALIDADES, LIMITES_FPS, type Calidad, type LimiteFps } from './rendimiento';
 import { DIFICULTADES, type Dificultad } from './core/difficulty';
 
 export type TamanoTexto = 'normal' | 'grande' | 'muyGrande';
@@ -18,6 +19,9 @@ export interface Configuracion {
   animacionesReducidas: boolean;
   pantallaCompleta: boolean;
   mostrarFps: boolean;
+  /** Calidad gráfica: «auto» ajusta la resolución según los FPS. */
+  calidad: Calidad;
+  limiteFps: LimiteFps;
 }
 
 function prefiereMenosMovimiento(): boolean {
@@ -41,6 +45,8 @@ export function configPorDefecto(): Configuracion {
     animacionesReducidas: prefiereMenosMovimiento(),
     pantallaCompleta: true,
     mostrarFps: false,
+    calidad: 'auto',
+    limiteFps: 60,
   };
 }
 
@@ -65,6 +71,8 @@ export function normalizarConfig(entrada: unknown): Configuracion {
     animacionesReducidas: bool(c.animacionesReducidas, d.animacionesReducidas),
     pantallaCompleta: bool(c.pantallaCompleta, d.pantallaCompleta),
     mostrarFps: bool(c.mostrarFps, d.mostrarFps),
+    calidad: uno(c.calidad, CALIDADES.map(([v]) => v), d.calidad),
+    limiteFps: uno(c.limiteFps, LIMITES_FPS.map(([v]) => v), d.limiteFps),
   };
 }
 

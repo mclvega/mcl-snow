@@ -1,7 +1,7 @@
 {
   "name": "mcl-snow",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shooter en primera persona por equipos en un mapa nevado, al estilo de fy_snow de Counter-Strike 1.6.",
   "type": "module",
   "scripts": {

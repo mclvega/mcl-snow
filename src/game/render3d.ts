@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { liberar } from '../rendimiento';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ARMAS, esCuerpoACuerpo, type Arma } from '../core/armas';
 import { LIMITE_X, LIMITE_Z, type Bloque } from '../core/mapa';
 import { animateWalk, createAvatar, DEFAULT_LOOK, LOOK_OPTIONS, type Look } from './characters';
@@ -165,6 +167,14 @@ export class Render3D {
   private impactos: THREE.Mesh[] = [];
   private nieve: THREE.Points;
   private balanceo = 0;
+  private sol: THREE.DirectionalLight;
+  private tamSombras = -1;
+  /** Uniformes de la nieve: cae en la GPU alrededor de la cámara. */
+  private uNieve = { uTiempo: { value: 0 }, uCentro: { value: new THREE.Vector3() } };
+  private va = new THREE.Vector3();
+  private vb = new THREE.Vector3();
+  private vp = new THREE.Vector3();
+  private static ARRIBA = new THREE.Vector3(0, 1, 0);
 
   constructor(lienzo: HTMLCanvasElement, bloques: Bloque[]) {
     this.renderer = new THREE.WebGLRenderer({ canvas: lienzo, antialias: true });
@@ -175,9 +185,10 @@ export class Render3D {
 
     this.escena.add(new THREE.HemisphereLight(0xf2f7ff, 0x8a9bb0, 1.4));
     const sol = new THREE.DirectionalLight(0xfff4e0, 1.5);
+    this.sol = sol;
     sol.position.set(20, 40, 15);
     sol.castShadow = true;
-    sol.shadow.mapSize.set(2048, 2048);
+    sol.shadow.mapSize.set(1024, 1024);
     Object.assign(sol.shadow.camera, { left: -40, right: 40, top: 30, bottom: -30, near: 1, far: 120 });
     this.escena.add(sol);
 
@@ -193,7 +204,25 @@ export class Render3D {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.nieve = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.06, transparent: true, opacity: 0.9, depthWrite: false }));
+    const matNieve = new THREE.PointsMaterial({ color: 0xffffff, size: 0.06, transparent: true, opacity: 0.9, depthWrite: false });
+    // La caída y el reciclado de los copos se hacen en el vertex shader: la CPU no toca las 1.500 posiciones.
+    matNieve.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.uNieve);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uTiempo;\nuniform vec3 uCentro;')
+        .replace(
+          '#include <begin_vertex>',
+          `vec3 transformed = position;
+          transformed.y = mod(position.y - uTiempo * 1.4, 25.0);
+          transformed.x += sin(uTiempo + position.z) * 0.3;
+          transformed.x = uCentro.x + mod(transformed.x - uCentro.x + 30.0, 60.0) - 30.0;
+          transformed.z = uCentro.z + mod(transformed.z - uCentro.z + 30.0, 60.0) - 30.0;
+          // Los copos pegados a la cámara se verían como cuadrados enormes: se suben.
+          if (distance(transformed, cameraPosition) < 1.5) transformed.y += 12.0;`,
+        );
+    };
+    this.nieve = new THREE.Points(geo, matNieve);
+    this.nieve.frustumCulled = false;
     this.escena.add(this.nieve);
 
     // Arma en primera persona, colgada de la cámara.
@@ -204,6 +233,23 @@ export class Render3D {
     this.camara.add(this.fogonazoVista, this.luzFogonazo);
     this.luzFogonazo.position.set(0.2, -0.1, -0.8);
     this.escena.add(this.camara);
+  }
+
+  /** Tamaño del mapa de sombras según la calidad (0 = sin sombras). Solo cambia el estado si cambia. */
+  sombras(tam: number) {
+    if (tam === this.tamSombras) return;
+    this.tamSombras = tam;
+    this.renderer.shadowMap.enabled = tam > 0;
+    if (tam > 0) {
+      this.sol.shadow.mapSize.set(tam, tam);
+      this.sol.shadow.map?.dispose();
+      this.sol.shadow.map = null;
+    }
+    // Los materiales se recompilan al activar o quitar las sombras.
+    this.escena.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (m) m.needsUpdate = true;
+    });
   }
 
   private construirMapa(bloques: Bloque[]) {
@@ -217,16 +263,30 @@ export class Render3D {
     const piedra = new THREE.MeshLambertMaterial({ map: texLadrillo('#7d8590', '#5c636c') });
     const hormigon = new THREE.MeshLambertMaterial({ color: 0x9ea7ae });
     const nieve = mat(0xf7fbff);
+    // Todo lo estático se fusiona por material: unas pocas llamadas de dibujo en vez de cientos.
+    const porMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    const estatico = {
+      add: (...ms: THREE.Mesh[]) => {
+        for (const m of ms) {
+          m.updateMatrix();
+          const g = m.geometry;
+          g.applyMatrix4(m.matrix);
+          const material = m.material as THREE.Material;
+          if (!porMaterial.has(material)) porMaterial.set(material, []);
+          porMaterial.get(material)!.push(g);
+        }
+      },
+    };
 
     for (const bl of bloques) {
       const alto = bl.y1 - bl.y0;
       if (bl.tipo === 'arbol') {
         const x = bl.x;
         const z = bl.z;
-        this.escena.add(malla(new THREE.CylinderGeometry(0.2, 0.28, 1.6, 8), mat(0x5d4037), x, 0.8, z));
+        estatico.add(malla(new THREE.CylinderGeometry(0.2, 0.28, 1.6, 8), mat(0x5d4037), x, 0.8, z));
         for (let k = 0; k < 3; k++) {
-          this.escena.add(malla(new THREE.ConeGeometry(1.6 - k * 0.4, 1.6, 9), mat(0x2e5d3a), x, 1.8 + k * 0.9, z));
-          this.escena.add(malla(new THREE.ConeGeometry(1.0 - k * 0.25, 0.6, 9), nieve, x, 2.35 + k * 0.9, z));
+          estatico.add(malla(new THREE.ConeGeometry(1.6 - k * 0.4, 1.6, 9), mat(0x2e5d3a), x, 1.8 + k * 0.9, z));
+          estatico.add(malla(new THREE.ConeGeometry(1.0 - k * 0.25, 0.6, 9), nieve, x, 2.35 + k * 0.9, z));
         }
         continue;
       }
@@ -242,14 +302,19 @@ export class Render3D {
           uv.setXY(i, uv.getX(i) * u * 0.5, uv.getY(i) * v * 0.5);
         }
       }
-      this.escena.add(malla(geo, material, bl.x, bl.y0 + alto / 2, bl.z));
+      estatico.add(malla(geo, material, bl.x, bl.y0 + alto / 2, bl.z));
       // Capa de nieve encima.
-      if (bl.tipo !== 'casa' || alto < 1) this.escena.add(malla(new THREE.BoxGeometry(bl.w + 0.06, 0.08, bl.d + 0.06), nieve, bl.x, bl.y1 + 0.04, bl.z));
+      if (bl.tipo !== 'casa' || alto < 1) estatico.add(malla(new THREE.BoxGeometry(bl.w + 0.06, 0.08, bl.d + 0.06), nieve, bl.x, bl.y1 + 0.04, bl.z));
     }
     // Tejados de las casas (solo visuales) con nieve.
     for (const [x, z] of [[-14, 17], [14, 17], [-14, -17], [14, -17]]) {
       const techo = malla(new THREE.BoxGeometry(9, 0.3, 7), mat(0x5a4636), x, 3.35, z);
-      this.escena.add(techo, malla(new THREE.BoxGeometry(9.1, 0.12, 7.1), nieve, x, 3.56, z));
+      estatico.add(techo, malla(new THREE.BoxGeometry(9.1, 0.12, 7.1), nieve, x, 3.56, z));
+    }
+    for (const [material, geos] of porMaterial) {
+      const unida = malla(mergeGeometries(geos), material);
+      for (const g of geos) g.dispose();
+      this.escena.add(unida);
     }
   }
 
@@ -291,6 +356,7 @@ export class Render3D {
       // El aspecto del jugador cambió: se rehace su modelo (lo ven los demás en las repeticiones).
       for (const [s, m] of this.modelos) if (s.esJugador) {
         this.escena.remove(m.grupo);
+        liberar(m.grupo);
         this.modelos.delete(s);
       }
       this.lookActual = clave;
@@ -299,6 +365,7 @@ export class Render3D {
     for (const [s, m] of this.modelos) {
       if (!vivos.has(s)) {
         this.escena.remove(m.grupo);
+        liberar(m.grupo);
         this.modelos.delete(s);
       }
     }
@@ -359,24 +426,8 @@ export class Render3D {
     this.dibujarTrazos(p);
 
     this.nieve.visible = efectos;
-    if (efectos) {
-      const pos = this.nieve.geometry.attributes.position as THREE.BufferAttribute;
-      const cx = this.camara.position.x;
-      const cz = this.camara.position.z;
-      for (let i = 0; i < pos.count; i++) {
-        let y = pos.getY(i) - dt * 1.4;
-        let x = pos.getX(i) + Math.sin(p.tiempo + i) * dt * 0.3;
-        let z = pos.getZ(i);
-        // Los copos muy cerca de la cámara se verían como cuadrados enormes: vuelven arriba.
-        if (y < 0 || (Math.abs(x - cx) < 1.5 && Math.abs(z - cz) < 1.5 && Math.abs(y - this.camara.position.y) < 1.5)) y += 25;
-        if (x - cx > 30) x -= 60;
-        if (cx - x > 30) x += 60;
-        if (z - cz > 30) z -= 60;
-        if (cz - z > 30) z += 60;
-        pos.setXYZ(i, x, y, z);
-      }
-      pos.needsUpdate = true;
-    }
+    this.uNieve.uTiempo.value = p.tiempo;
+    this.uNieve.uCentro.value.copy(this.camara.position);
 
     this.renderer.render(this.escena, this.camara);
   }
@@ -422,13 +473,13 @@ export class Render3D {
       const t = p.trazos[i];
       m.visible = !!t;
       if (!t) return;
-      const a = new THREE.Vector3(t.x0, t.y0, t.z0);
-      const b = new THREE.Vector3(t.x1, t.y1, t.z1);
+      const a = this.va.set(t.x0, t.y0, t.z0);
+      const b = this.vb.set(t.x1, t.y1, t.z1);
       // El trazo propio arranca un poco delante para no tapar la vista.
       if (t.propio) a.lerp(b, Math.min(0.5, 1.5 / a.distanceTo(b)));
       m.position.copy(a).add(b).multiplyScalar(0.5);
       m.scale.set(1, a.distanceTo(b), 1);
-      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.sub(a).normalize());
+      m.quaternion.setFromUnitVectors(Render3D.ARRIBA, b.sub(a).normalize());
     });
 
     while (this.impactos.length < p.impactos.length) {
@@ -448,7 +499,7 @@ export class Render3D {
 
   /** Proyecta un punto del mundo a la pantalla (para el radar y nombres). */
   proyectar(x: number, y: number, z: number, ancho: number, alto: number): { x: number; y: number; visible: boolean } {
-    const v = new THREE.Vector3(x, y, z).project(this.camara);
+    const v = this.vp.set(x, y, z).project(this.camara);
     return { x: ((v.x + 1) / 2) * ancho, y: ((1 - v.y) / 2) * alto, visible: v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2 };
   }
 }

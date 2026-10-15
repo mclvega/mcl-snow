@@ -161,26 +161,32 @@ export function moverCuerpo(c: Cuerpo, dx: number, dz: number, dt: number, bloqu
   c.y = nuevaY;
 }
 
+let t0 = 0;
+let t1 = Infinity;
+/** Recorta el intervalo [t0, t1] del rayo con una franja de un eje. */
+function eje(o: number, d: number, mn: number, mx: number): boolean {
+  if (Math.abs(d) < 1e-9) return o >= mn && o <= mx;
+  let a = (mn - o) / d;
+  let b2 = (mx - o) / d;
+  if (a > b2) {
+    const c = a;
+    a = b2;
+    b2 = c;
+  }
+  if (a > t0) t0 = a;
+  if (b2 < t1) t1 = b2;
+  return t0 <= t1;
+}
+
 /** Distancia a la que un rayo entra en una caja alineada con los ejes (o Infinity si no la toca). */
 export function rayoCaja(
   ox: number, oy: number, oz: number, dx: number, dy: number, dz: number,
   minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number,
 ): number {
-  let t0 = 0;
-  let t1 = Infinity;
-  const ejes: Array<[number, number, number, number]> = [[ox, dx, minX, maxX], [oy, dy, minY, maxY], [oz, dz, minZ, maxZ]];
-  for (const [o, d, mn, mx] of ejes) {
-    if (Math.abs(d) < 1e-9) {
-      if (o < mn || o > mx) return Infinity;
-      continue;
-    }
-    let a = (mn - o) / d;
-    let b2 = (mx - o) / d;
-    if (a > b2) [a, b2] = [b2, a];
-    t0 = Math.max(t0, a);
-    t1 = Math.min(t1, b2);
-    if (t0 > t1) return Infinity;
-  }
+  // Sin arrays temporales: se llama cientos de veces por paso (disparos y línea de visión de los bots).
+  t0 = 0;
+  t1 = Infinity;
+  if (!eje(ox, dx, minX, maxX) || !eje(oy, dy, minY, maxY) || !eje(oz, dz, minZ, maxZ)) return Infinity;
   return t0;
 }
 
