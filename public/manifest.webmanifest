@@ -1,0 +1,9 @@
+{
+  "name": "McL Snow",
+  "short_name": "McL Snow",
+  "start_url": "/",
+  "display": "fullscreen",`n  "orientation": "landscape",
+  "background_color": "#1d2733",
+  "theme_color": "#1d2733",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
