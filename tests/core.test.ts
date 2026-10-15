@@ -55,8 +55,12 @@ describe('mapa', () => {
 
 describe('partida', () => {
   it('las rondas no se acaban y crecen los equipos', () => {
-    expect(Partida.equipos(1)).toEqual({ aliados: 1, enemigos: 2 });
-    expect(Partida.equipos(20).enemigos).toBe(8);
+    // Mínimo 6 por equipo: tú + 5 aliados contra 6 enemigos.
+    expect(Partida.equipos(1)).toEqual({ aliados: 5, enemigos: 6 });
+    expect(Partida.equipos(40)).toEqual({ aliados: 9, enemigos: 12 });
+    const p = new Partida(() => MODOS.normal, { fin: () => undefined }, 1);
+    expect(p.soldados.filter((s) => s.equipo === 'ct')).toHaveLength(6);
+    expect(p.soldados.filter((s) => s.equipo === 't')).toHaveLength(6);
   });
 
   it('dirección de la mirada', () => {
@@ -93,6 +97,26 @@ describe('partida', () => {
     p.actualizar(PASO, r);
     for (let i = 0; i < 60 * 3; i++) p.actualizar(PASO, controlesVacios());
     expect(p.jugador.municion.pistola.cargador).toBe(7);
+  });
+});
+
+describe('armas', () => {
+  it('la escopeta reparte perdigones y los cuchillos no gastan munición', () => {
+    const p = new Partida(() => MODOS.normal, { fin: () => undefined }, 4);
+    const c = controlesVacios();
+    c.arma = 'escopeta';
+    p.actualizar(PASO, c);
+    for (let i = 0; i < 30; i++) p.actualizar(PASO, controlesVacios());
+    const d = controlesVacios();
+    d.disparar = true;
+    p.actualizar(PASO, d);
+    expect(p.jugador.municion.escopeta.cargador).toBe(7);
+    expect(p.trazos.length).toBeGreaterThan(1);
+    const k = controlesVacios();
+    k.arma = 'karambit';
+    p.actualizar(PASO, k);
+    for (let i = 0; i < 60; i++) p.actualizar(PASO, { ...controlesVacios(), disparar: true });
+    expect(p.jugador.municion.karambit.cargador).toBe(Infinity);
   });
 });
 

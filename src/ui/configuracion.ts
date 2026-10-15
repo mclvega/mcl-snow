@@ -79,6 +79,7 @@ export function panelConfiguracion(opciones: { enJuego?: boolean; alReiniciar: (
       opcion('Dificultad', segmentado('dificultad', DIFICULTADES.map((d) => [d, MODOS[d].nombre]), 'Dificultad'), 'El cambio se aplica en la siguiente ronda.'),
       opcion('Sensibilidad de la cámara', deslizador('sensibilidad', 'Sensibilidad de la cámara', '', '1', '1', '10')),
       opcion('Apuntado asistido', siNo('apuntadoAsistido', 'Apuntado asistido'), 'En pantallas táctiles, la mira se acerca sola al enemigo más cercano.'),
+      opcion('Disparo automático', siNo('disparoAutomatico', 'Disparo automático'), 'En pantallas táctiles, dispara solo cuando la mira está sobre un enemigo (como el modo simple de los shooters móviles).'),
     ),
     seccion('🔊 Sonido', opcion('Volumen', deslizador('volumenGeneral', 'Volumen general')), opcion('Efectos', deslizador('volumenEfectos', 'Volumen de los efectos'))),
     seccion(

@@ -1,5 +1,5 @@
 import type { Modo } from '../core/difficulty';
-import { ARMAS, ORDEN_ARMAS, multiplicadorZona, type Arma } from '../core/armas';
+import { ARMAS, ARMAS_BOTS, ORDEN_ARMAS, esCuerpoACuerpo, multiplicadorZona, type Arma } from '../core/armas';
 import { crearMapa, moverCuerpo, PUNTOS_PATRULLA, rayoCaja, rayoMapa, seVen, spawns, type Bloque, type Cuerpo, type Equipo } from '../core/mapa';
 import { crearRng, type Rng } from '../core/rng';
 
@@ -22,9 +22,11 @@ export interface Controles {
   zoom: boolean;
   /** Ayuda de apuntado (pantallas táctiles). */
   asistido: boolean;
+  /** Disparo automático cuando la mira está sobre un enemigo (modo simple de los shooters móviles). */
+  autoDisparo: boolean;
 }
 
-export const controlesVacios = (): Controles => ({ x: 0, z: 0, giroX: 0, giroY: 0, disparar: false, saltar: false, recargar: false, arma: null, zoom: false, asistido: false });
+export const controlesVacios = (): Controles => ({ x: 0, z: 0, giroX: 0, giroY: 0, disparar: false, saltar: false, recargar: false, arma: null, zoom: false, asistido: false, autoDisparo: false });
 
 interface Municion {
   cargador: number;
@@ -115,7 +117,7 @@ export class Partida {
   /* ---------- Rondas ---------- */
 
   private crearSoldado(equipo: Equipo, esJugador: boolean, nombre: string, pos: { x: number; z: number }): Soldado {
-    const arma: Arma = esJugador ? 'rifle' : this.rng.elegir(['rifle', 'rifle', 'rifle', 'pistola', 'francotirador'] as Arma[]);
+    const arma: Arma = esJugador ? 'rifle' : this.rng.elegir(ARMAS_BOTS);
     const municion = Object.fromEntries(ORDEN_ARMAS.map((a) => [a, { cargador: ARMAS[a].cargador, reserva: ARMAS[a].reserva }])) as Record<Arma, Municion>;
     return {
       id: this.siguienteId++, nombre, equipo, esJugador,
@@ -125,9 +127,12 @@ export class Partida {
     };
   }
 
-  /** Tamaño de cada equipo según la ronda: las rondas no se acaban y cada vez hay más enemigos. */
+  /**
+   * Tamaño de cada equipo según la ronda: mínimo 6 por equipo (tú y 5 aliados contra 6),
+   * las rondas no se acaban y cada vez hay más enemigos.
+   */
   static equipos(ronda: number) {
-    return { aliados: Math.min(4, 1 + Math.floor(ronda / 3)), enemigos: Math.min(8, 2 + Math.floor(ronda / 2)) };
+    return { aliados: Math.min(9, 5 + Math.floor(ronda / 4)), enemigos: Math.min(12, 6 + Math.floor((ronda - 1) / 2)) };
   }
 
   nuevaRonda() {
@@ -220,7 +225,8 @@ export class Partida {
   private actualizarJugador(dt: number, c: Controles) {
     const j = this.jugador;
     if (!j.vivo) return;
-    const sens = this.zoom ? 0.3 : 1;
+    // Con la mira la cámara gira más despacio (más aún con la telescópica).
+    const sens = this.zoom ? (ARMAS[j.arma].zoom ? 0.3 : 0.65) : 1;
     j.yaw -= c.giroX * sens;
     j.pitch = Math.max(-1.45, Math.min(1.45, j.pitch - c.giroY * sens));
 
@@ -235,13 +241,14 @@ export class Partida {
         this.zoom = false;
       }
     }
-    if (c.zoom && ARMAS[j.arma].zoom) this.zoom = !this.zoom;
+    // Mira (ADS) en todas las armas de fuego; con la AWP es la telescópica.
+    if (c.zoom && !esCuerpoACuerpo(j.arma)) this.zoom = !this.zoom;
     if (c.recargar) this.recargar(j);
 
     const largo = Math.hypot(c.x, c.z);
     const mx = largo > 1 ? c.x / largo : c.x;
     const mz = largo > 1 ? c.z / largo : c.z;
-    const vel = (j.arma === 'cuchillo' ? 1.15 : j.arma === 'francotirador' ? 0.85 : 1) * VELOCIDAD * (this.zoom ? 0.5 : 1);
+    const vel = ARMAS[j.arma].movilidad * VELOCIDAD * (this.zoom ? (ARMAS[j.arma].zoom ? 0.5 : 0.7) : 1);
     // Adelante es -z en el sistema de la cámara; se rota por el yaw.
     const sin = Math.sin(j.yaw);
     const cos = Math.cos(j.yaw);
@@ -251,7 +258,7 @@ export class Partida {
     if (c.saltar && j.cuerpo.enSuelo) j.cuerpo.vy = SALTO;
     moverCuerpo(j.cuerpo, dx, dz, dt, this.bloques);
 
-    if (c.disparar) this.disparar(j);
+    if (c.disparar || (c.autoDisparo && this.enemigoEnMira())) this.disparar(j);
   }
 
   /** Ayuda de apuntado: acerca la mira al enemigo visible más cercano al centro. */
@@ -326,45 +333,67 @@ export class Partida {
     let dispersion = d.precision + (s.moviendose || !s.cuerpo.enSuelo ? d.dispersionMovimiento : 0) + precisionExtra;
     if (s.esJugador) {
       dispersion += this.retroceso;
-      // Sin zoom, el francotirador es muy impreciso (como en CS).
+      // Sin zoom, el francotirador es muy impreciso (como en CS); con la mira, el resto gana precisión.
       if (s.arma === 'francotirador' && !this.zoom) dispersion += 0.08;
+      else if (this.zoom) dispersion *= 0.45;
     }
-    const yaw = s.yaw + (this.rng.siguiente() - 0.5) * 2 * dispersion;
-    const pitch = s.pitch + (this.rng.siguiente() - 0.5) * 2 * dispersion + (s.esJugador ? this.retroceso * 0.5 : 0);
-    const dir = Partida.direccion(yaw, pitch);
+    const retrocesoAntes = this.retroceso;
     if (s.esJugador) {
       this.retroceso = Math.min(0.08, this.retroceso + d.retroceso);
       if (s.arma === 'francotirador') this.zoom = false;
     }
+    // Cada perdigón es un rayo; el daño a cada soldado se suma y se aplica una vez.
+    const danos = new Map<Soldado, { dano: number; cabeza: boolean }>();
+    for (let k = 0; k < d.perdigones; k++) {
+      const yaw = s.yaw + (this.rng.siguiente() - 0.5) * 2 * dispersion;
+      const pitch = s.pitch + (this.rng.siguiente() - 0.5) * 2 * dispersion + (s.esJugador ? retrocesoAntes * 0.5 : 0);
+      const dir = Partida.direccion(yaw, pitch);
 
+      const hasta = rayoMapa(ojo.x, ojo.y, ojo.z, dir.x, dir.y, dir.z, this.bloques, d.alcance);
+      let golpe: { s: Soldado; t: number; zona: 'cabeza' | 'cuerpo' | 'piernas' } | null = null;
+      for (const o of this.soldados) {
+        if (!o.vivo || o === s || o.equipo === s.equipo) continue;
+        const { x, y, z } = o.cuerpo;
+        const zonas: Array<['cabeza' | 'cuerpo' | 'piernas', number, number, number]> = [
+          ['cabeza', 1.38, 1.78, 0.17],
+          ['cuerpo', 0.75, 1.38, 0.3],
+          ['piernas', 0, 0.75, 0.22],
+        ];
+        for (const [zona, y0, y1, r] of zonas) {
+          const t = rayoCaja(ojo.x, ojo.y, ojo.z, dir.x, dir.y, dir.z, x - r, y + y0, z - r, x + r, y + y1, z + r);
+          if (t < hasta && (!golpe || t < golpe.t)) golpe = { s: o, t, zona };
+        }
+    }
+      const fin = golpe ? golpe.t : hasta;
+      const px = ojo.x + dir.x * fin;
+      const py = ojo.y + dir.y * fin;
+      const pz = ojo.z + dir.z * fin;
+      if (!esCuerpoACuerpo(s.arma) && (k < 3 || d.perdigones === 1)) this.trazos.push({ x0: ojo.x, y0: ojo.y - 0.15, z0: ojo.z, x1: px, y1: py, z1: pz, t: 0.06, propio: s.esJugador });
+      if (golpe) {
+        this.impactos.push({ x: px, y: py, z: pz, t: 0.5, sangre: true });
+        let dano = d.dano * multiplicadorZona(golpe.zona);
+        if (!s.esJugador && golpe.s.esJugador) dano *= this.modoRonda.dano;
+        const previo = danos.get(golpe.s) ?? { dano: 0, cabeza: false };
+        danos.set(golpe.s, { dano: previo.dano + dano, cabeza: previo.cabeza || golpe.zona === 'cabeza' });
+      } else if (fin < d.alcance - 0.01) {
+        this.impactos.push({ x: px, y: py, z: pz, t: 2, sangre: false });
+    }
+    }
+    for (const [v, r] of danos) this.herir(v, r.dano, s, r.cabeza);
+  }
+
+  /** ¿Hay un enemigo vivo justo en el centro de la mira, a tiro y sin obstáculos? */
+  enemigoEnMira(): boolean {
+    const j = this.jugador;
+    const d = ARMAS[j.arma];
+    const ojo = this.ojo(j);
+    const dir = Partida.direccion(j.yaw, j.pitch);
     const hasta = rayoMapa(ojo.x, ojo.y, ojo.z, dir.x, dir.y, dir.z, this.bloques, d.alcance);
-    let golpe: { s: Soldado; t: number; zona: 'cabeza' | 'cuerpo' | 'piernas' } | null = null;
-    for (const o of this.soldados) {
-      if (!o.vivo || o === s || o.equipo === s.equipo) continue;
+    return this.soldados.some((o) => {
+      if (!o.vivo || o.equipo === j.equipo) return false;
       const { x, y, z } = o.cuerpo;
-      const zonas: Array<['cabeza' | 'cuerpo' | 'piernas', number, number, number]> = [
-        ['cabeza', 1.38, 1.78, 0.17],
-        ['cuerpo', 0.75, 1.38, 0.3],
-        ['piernas', 0, 0.75, 0.22],
-      ];
-      for (const [zona, y0, y1, r] of zonas) {
-        const t = rayoCaja(ojo.x, ojo.y, ojo.z, dir.x, dir.y, dir.z, x - r, y + y0, z - r, x + r, y + y1, z + r);
-        if (t < hasta && (!golpe || t < golpe.t)) golpe = { s: o, t, zona };
-      }
-    }
-    const fin = golpe ? golpe.t : hasta;
-    const px = ojo.x + dir.x * fin;
-    const py = ojo.y + dir.y * fin;
-    const pz = ojo.z + dir.z * fin;
-    if (s.arma !== 'cuchillo') this.trazos.push({ x0: ojo.x, y0: ojo.y - 0.15, z0: ojo.z, x1: px, y1: py, z1: pz, t: 0.06, propio: s.esJugador });
-    if (golpe) {
-      this.impactos.push({ x: px, y: py, z: pz, t: 0.5, sangre: true });
-      let dano = d.dano * multiplicadorZona(golpe.zona);
-      if (!s.esJugador && golpe.s.esJugador) dano *= this.modoRonda.dano;
-      this.herir(golpe.s, dano, s, golpe.zona === 'cabeza');
-    } else if (fin < d.alcance - 0.01) {
-      this.impactos.push({ x: px, y: py, z: pz, t: 2, sangre: false });
-    }
+      return rayoCaja(ojo.x, ojo.y, ojo.z, dir.x, dir.y, dir.z, x - 0.32, y, z - 0.32, x + 0.32, y + 1.78, z + 0.32) < hasta;
+    });
   }
 
   /** Se llama cuando el jugador suelta el gatillo (armas semiautomáticas). */

@@ -24,13 +24,14 @@ const entrada = new Entrada(
   [
     { nombre: 'arma', teclas: ['KeyQ'], mando: 3, etiqueta: '🔄' },
     { nombre: 'recargar', teclas: ['KeyR'], mando: 2, etiqueta: 'R' },
-    { nombre: 'mira', teclas: ['KeyE'], mando: 4, etiqueta: '🔭' },
+    { nombre: 'mira', teclas: ['KeyE'], mando: 6, etiqueta: '🔭' },
     { nombre: 'saltar', teclas: ['Space'], mando: 0, etiqueta: '⤒' },
-    { nombre: 'disparar', teclas: [], mando: 7, etiqueta: '🔫' },
+    // En táctil el disparo usa botones propios (ver más abajo); aquí queda para el mando (gatillo derecho).
+    { nombre: 'disparar', teclas: [], mando: 7, etiqueta: '' },
   ],
   controles,
 );
-const tactil = matchMedia('(pointer: coarse)').matches;
+const tactil = matchMedia('(pointer: coarse)').matches || (import.meta.env.DEV && location.search.includes('tactil'));
 if (tactil) document.body.classList.add('tactil');
 
 let partida: Partida | null = null;
@@ -93,23 +94,83 @@ document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement !== lienzo3d && partida && !partida.terminada && !partida.pausada && !tactil) pausar();
 });
 
+/*
+ * Controles táctiles al estilo de los shooters móviles (CoD Mobile):
+ * - Mitad derecha: arrastrar para mirar.
+ * - Botón de disparo grande a la derecha: mientras se mantiene, arrastrar también apunta,
+ *   así se dispara y se corrige la mira con el mismo dedo.
+ * - Deslizar hacia arriba desde el botón de disparo activa o quita la mira (ADS).
+ * - Botón de disparo pequeño a la izquierda: dispara con el pulgar izquierdo mientras el derecho apunta.
+ */
+const GIRO_TACTIL = 0.0055;
 const zonaMirar = h('div', { class: 'zona-mirar' });
 controles.prepend(zonaMirar);
-let toqueMirar = { id: -1, x: 0, y: 0 };
-zonaMirar.addEventListener('pointerdown', (e) => {
-  zonaMirar.setPointerCapture(e.pointerId);
-  toqueMirar = { id: e.pointerId, x: e.clientX, y: e.clientY };
-});
-zonaMirar.addEventListener('pointermove', (e) => {
-  if (e.pointerId !== toqueMirar.id) return;
-  giroX += (e.clientX - toqueMirar.x) * 0.0055 * sensibilidad();
-  giroY += (e.clientY - toqueMirar.y) * 0.0055 * sensibilidad();
-  toqueMirar.x = e.clientX;
-  toqueMirar.y = e.clientY;
-});
-const soltarMirar = (e: PointerEvent) => e.pointerId === toqueMirar.id && (toqueMirar.id = -1);
-zonaMirar.addEventListener('pointerup', soltarMirar);
-zonaMirar.addEventListener('pointercancel', soltarMirar);
+
+/** Hace que un elemento gire la cámara al arrastrar; `alMover` recibe el desplazamiento desde el inicio. */
+function arrastrarParaMirar(el: HTMLElement, alEmpezar?: () => void, alMover?: (dx: number, dy: number, t: number) => void, alSoltar?: () => void) {
+  let toque = { id: -1, x: 0, y: 0, x0: 0, y0: 0, t0: 0 };
+  el.addEventListener('pointerdown', (e) => {
+    if (toque.id !== -1) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    toque = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now() };
+    alEmpezar?.();
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== toque.id) return;
+    giroX += (e.clientX - toque.x) * GIRO_TACTIL * sensibilidad();
+    giroY += (e.clientY - toque.y) * GIRO_TACTIL * sensibilidad();
+    toque.x = e.clientX;
+    toque.y = e.clientY;
+    alMover?.(e.clientX - toque.x0, e.clientY - toque.y0, performance.now() - toque.t0);
+  });
+  const soltar = (e: PointerEvent) => {
+    if (e.pointerId !== toque.id) return;
+    toque.id = -1;
+    alSoltar?.();
+  };
+  el.addEventListener('pointerup', soltar);
+  el.addEventListener('pointercancel', soltar);
+}
+arrastrarParaMirar(zonaMirar);
+
+let fuegoTactil = 0;
+const botonFuego = h('div', { class: 'fuego fuego-der', 'aria-label': 'Disparar (desliza hacia arriba para apuntar)', role: 'button' }, h('span', { text: '🔫' }), h('small', { text: '⇡ mira' }));
+const botonFuegoIzq = h('div', { class: 'fuego fuego-izq', 'aria-label': 'Disparar', role: 'button' }, h('span', { text: '🔫' }));
+controles.append(botonFuego, botonFuegoIzq);
+let deslizoMira = false;
+arrastrarParaMirar(
+  botonFuego,
+  () => {
+    fuegoTactil++;
+    deslizoMira = false;
+    botonFuego.classList.add('activo');
+  },
+  (dx, dy, t) => {
+    // Deslizar hacia arriba rápido desde el botón: activa o quita la mira, una vez por toque.
+    if (!deslizoMira && dy < -55 && Math.abs(dx) < 50 && t < 450) {
+      deslizoMira = true;
+      zoomPendiente = true;
+      navigator.vibrate?.(15);
+    }
+  },
+  () => {
+    fuegoTactil--;
+    botonFuego.classList.remove('activo');
+  },
+);
+arrastrarParaMirar(
+  botonFuegoIzq,
+  () => {
+    fuegoTactil++;
+    botonFuegoIzq.classList.add('activo');
+  },
+  undefined,
+  () => {
+    fuegoTactil--;
+    botonFuegoIzq.classList.remove('activo');
+  },
+);
 
 document.body.append(h('button', { type: 'button', class: 'boton-pausa', 'aria-label': 'Pausa', text: '⏸', onclick: () => pausar() }));
 
@@ -127,8 +188,8 @@ function jugando(si: boolean) {
 }
 
 const AYUDA = tactil
-  ? 'Joystick izquierdo para moverte y arrastra a la derecha para mirar. 🔫 dispara, ⤒ salta, R recarga, 🔄 cambia de arma y 🔭 apunta con la AWP.'
-  : 'WASD para moverte, ratón para mirar y clic para disparar. Clic derecho: mira de la AWP. Espacio salta, R recarga, Q o la rueda cambian de arma (1 a 4 para elegir). Esc pausa.';
+  ? 'Joystick izquierdo para moverte; arrastra a la derecha para mirar. Mantén 🔫 para disparar y arrastra sin soltar para apuntar mientras disparas. Desliza hacia arriba desde 🔫 (o toca 🔭) para usar la mira. El 🔫 pequeño de la izquierda dispara mientras apuntas con la derecha. ⤒ salta, R recarga y 🔄 cambia de arma.'
+  : 'WASD para moverte, ratón para mirar y clic para disparar. Clic derecho o E: mira (telescópica con la AWP). Espacio salta, R recarga, Q o la rueda cambian de arma (0 a 9 para elegir). Esc pausa.';
 
 function bienvenida() {
   jugando(false);
@@ -297,7 +358,7 @@ function dibujarHud(p: Partida, dt: number) {
     ctx.fillRect(0, 0, ancho, alto);
   }
 
-  if (p.zoom && j.vivo) {
+  if (p.zoom && j.vivo && ARMAS[j.arma].zoom) {
     // Mira telescópica de la AWP.
     const r = Math.min(ancho, alto) * 0.45;
     ctx.fillStyle = '#000';
@@ -451,12 +512,13 @@ iniciarBucle(
     c.giroX = giroX;
     c.giroY = giroY;
     giroX = giroY = 0;
-    c.disparar = raton || entrada.activo('disparar');
+    c.disparar = raton || fuegoTactil > 0 || entrada.activo('disparar');
     c.saltar = entrada.activo('saltar');
     c.recargar = entrada.pulsado('recargar');
     c.zoom = zoomPendiente || entrada.pulsado('mira');
     c.arma = armaPendiente ?? (entrada.pulsado('arma') ? 'siguiente' : null);
     c.asistido = tactil && app.g.config.apuntadoAsistido;
+    c.autoDisparo = tactil && app.g.config.disparoAutomatico;
     zoomPendiente = false;
     armaPendiente = null;
     if (!c.disparar) partida.soltarGatillo();

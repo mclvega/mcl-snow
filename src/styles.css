@@ -150,3 +150,16 @@ input[type='text'] { font: inherit; padding: 12px; border-radius: 10px; border: 
 :root:not([data-theme='light']) .capa { background: rgb(0 0 0 / 0.82); }
 :root:not([data-theme='light']) input[type='text'] { background: #000; border-color: #333; }
 :root:not([data-theme='light']) .boton-pausa { background: #000; border: 1px solid #333; }
+/* Disparo táctil al estilo de los shooters móviles: botón grande a la derecha (arrastrar = apuntar, deslizar arriba = mira) y otro pequeño a la izquierda. */
+.boton-tactil[aria-label='disparar'] { display: none; }
+.fuego {
+  position: absolute; display: grid; place-items: center; border-radius: 50%; pointer-events: auto; touch-action: none; z-index: 2;
+  background: rgb(255 70 50 / 0.28); border: 2px solid rgb(255 120 100 / 0.7); color: #fff; user-select: none;
+}
+.fuego span { font-size: 30px; line-height: 1; }
+.fuego small { position: absolute; top: -20px; font-size: 11px; font-weight: 700; opacity: 0.8; }
+.fuego.activo { background: rgb(255 70 50 / 0.55); transform: scale(0.94); }
+.fuego-der { width: 96px; height: 96px; right: max(96px, calc(env(safe-area-inset-right) + 86px)); bottom: max(108px, calc(env(safe-area-inset-bottom) + 100px)); }
+.fuego-izq { width: 62px; height: 62px; left: max(22px, env(safe-area-inset-left)); top: 48%; }
+.fuego-izq span { font-size: 22px; }
+.botones-tactiles { right: max(12px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }

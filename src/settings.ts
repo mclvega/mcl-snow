@@ -9,6 +9,8 @@ export interface Configuracion {
   sensibilidad: number;
   /** Mira asistida en pantallas táctiles. */
   apuntadoAsistido: boolean;
+  /** Dispara solo cuando la mira está sobre un enemigo (pantallas táctiles). */
+  disparoAutomatico: boolean;
   volumenGeneral: number;
   volumenEfectos: number;
   tema: Tema;
@@ -31,6 +33,7 @@ export function configPorDefecto(): Configuracion {
     dificultad: 'normal',
     sensibilidad: 5,
     apuntadoAsistido: true,
+    disparoAutomatico: false,
     volumenGeneral: 70,
     volumenEfectos: 70,
     tema: 'oscuro',
@@ -54,6 +57,7 @@ export function normalizarConfig(entrada: unknown): Configuracion {
     dificultad: uno(c.dificultad, DIFICULTADES, d.dificultad),
     sensibilidad: num(c.sensibilidad, 1, 10, d.sensibilidad),
     apuntadoAsistido: bool(c.apuntadoAsistido, d.apuntadoAsistido),
+    disparoAutomatico: bool(c.disparoAutomatico, d.disparoAutomatico),
     volumenGeneral: num(c.volumenGeneral, 0, 100, d.volumenGeneral),
     volumenEfectos: num(c.volumenEfectos, 0, 100, d.volumenEfectos),
     tema: uno(c.tema, ['claro', 'oscuro'] as const, d.tema),

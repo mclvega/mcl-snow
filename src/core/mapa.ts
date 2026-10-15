@@ -83,10 +83,12 @@ export function crearMapa(): Bloque[] {
   return bloques;
 }
 
-/** Puntos de aparición de cada equipo. */
+/** Puntos de aparición de cada equipo: dos filas delante de su base (hasta 18 por equipo). */
 export function spawns(equipo: Equipo): Array<{ x: number; z: number }> {
-  const z = equipo === 'ct' ? 19.5 : -19.5;
-  return [-19, -9, -4, 0, 4, 9, 19, -24, 24].map((x) => ({ x, z: x === 0 ? z - Math.sign(z) : z }));
+  const signo = equipo === 'ct' ? 1 : -1;
+  const filas = [19.5, 12.5];
+  const xs = [0, -4, 4, -9, 9, -19, 19, -24, 24];
+  return filas.flatMap((z) => xs.map((x) => ({ x, z: signo * (x === 0 && z > 15 ? z - 1 : z) })));
 }
 
 /** Puntos por los que patrullan los bots. */

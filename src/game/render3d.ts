@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Arma } from '../core/armas';
+import { ARMAS, esCuerpoACuerpo, type Arma } from '../core/armas';
 import { LIMITE_X, LIMITE_Z, type Bloque } from '../core/mapa';
 import { animateWalk, createAvatar, DEFAULT_LOOK, LOOK_OPTIONS, type Look } from './characters';
 import { ALTURA_OJOS, Partida, type Soldado } from './logica';
@@ -103,6 +103,38 @@ function modeloArma(arma: Arma, primeraPersona: boolean): THREE.Group {
     case 'pistola':
       g.add(malla(new THREE.BoxGeometry(0.06 * e, 0.07 * e, 0.24 * e), mat(0x9e9e9e), 0, 0, -0.05 * e));
       g.add(malla(new THREE.BoxGeometry(0.05 * e, 0.13 * e, 0.06 * e), metal, 0, -0.08 * e, 0.04 * e));
+      break;
+    case 'm4':
+      g.add(malla(new THREE.BoxGeometry(0.06 * e, 0.09 * e, 0.62 * e), metal, 0, 0, -0.1 * e));
+      g.add(malla(new THREE.BoxGeometry(0.05 * e, 0.1 * e, 0.2 * e), mat(0x3a3a3a), 0, -0.01 * e, 0.3 * e));
+      g.add(malla(new THREE.BoxGeometry(0.03 * e, 0.06 * e, 0.16 * e), metal, 0, 0.08 * e, -0.05 * e));
+      g.add(malla(new THREE.BoxGeometry(0.04 * e, 0.14 * e, 0.05 * e), metal, 0, -0.1 * e, -0.08 * e));
+      g.add(malla(new THREE.CylinderGeometry(0.014 * e, 0.014 * e, 0.28 * e, 6), metal, 0, 0.01 * e, -0.52 * e).rotateX(Math.PI / 2));
+      break;
+    case 'subfusil':
+      g.add(malla(new THREE.BoxGeometry(0.07 * e, 0.1 * e, 0.42 * e), metal, 0, 0, -0.05 * e));
+      g.add(malla(new THREE.BoxGeometry(0.035 * e, 0.16 * e, 0.05 * e), metal, 0, -0.11 * e, -0.12 * e));
+      g.add(malla(new THREE.BoxGeometry(0.04 * e, 0.12 * e, 0.06 * e), metal, 0, -0.09 * e, 0.06 * e));
+      break;
+    case 'escopeta':
+      g.add(malla(new THREE.CylinderGeometry(0.03 * e, 0.03 * e, 0.75 * e, 8), metal, 0, 0.02 * e, -0.18 * e).rotateX(Math.PI / 2));
+      g.add(malla(new THREE.CylinderGeometry(0.035 * e, 0.035 * e, 0.3 * e, 8), madera, 0, -0.04 * e, -0.2 * e).rotateX(Math.PI / 2));
+      g.add(malla(new THREE.BoxGeometry(0.06 * e, 0.12 * e, 0.26 * e), madera, 0, -0.03 * e, 0.24 * e));
+      break;
+    case 'glock':
+      g.add(malla(new THREE.BoxGeometry(0.05 * e, 0.065 * e, 0.2 * e), mat(0x1e1e1e), 0, 0, -0.04 * e));
+      g.add(malla(new THREE.BoxGeometry(0.045 * e, 0.12 * e, 0.055 * e), mat(0x1e1e1e), 0, -0.08 * e, 0.03 * e));
+      break;
+    case 'karambit': {
+      const hoja = malla(new THREE.TorusGeometry(0.09 * e, 0.012 * e, 4, 12, Math.PI * 1.1), mat(0xcfd8dc), 0, 0.02 * e, -0.12 * e);
+      hoja.rotation.y = Math.PI / 2;
+      g.add(hoja, malla(new THREE.BoxGeometry(0.03 * e, 0.05 * e, 0.1 * e), mat(0x6a1b9a), 0, 0, 0.03 * e));
+      g.add(malla(new THREE.TorusGeometry(0.025 * e, 0.008 * e, 4, 10), metal, 0, 0, 0.09 * e).rotateY(Math.PI / 2));
+      break;
+    }
+    case 'machete':
+      g.add(malla(new THREE.BoxGeometry(0.015 * e, 0.08 * e, 0.45 * e), mat(0xb0bec5), 0, 0.01 * e, -0.24 * e));
+      g.add(malla(new THREE.BoxGeometry(0.035 * e, 0.05 * e, 0.13 * e), mat(0x3e2723), 0, 0, 0.06 * e));
       break;
     case 'cuchillo':
       g.add(malla(new THREE.BoxGeometry(0.02 * e, 0.05 * e, 0.24 * e), mat(0xcfd8dc), 0, 0, -0.12 * e));
@@ -276,7 +308,8 @@ export class Render3D {
       this.camara.position.set(j.cuerpo.x + 2, j.cuerpo.y + 4.5, j.cuerpo.z + 2);
       this.camara.lookAt(j.cuerpo.x, 0, j.cuerpo.z);
     }
-    const fov = p.zoom ? 75 / 4 : 75;
+    // Mira: zoom ligero con cualquier arma y ×4 con la telescópica de la AWP.
+    const fov = p.zoom ? 75 / (ARMAS[j.arma].zoom ?? 1.4) : 75;
     if (this.camara.fov !== fov) {
       this.camara.fov = fov;
       this.camara.updateProjectionMatrix();
@@ -293,7 +326,7 @@ export class Render3D {
         const brazos = m.cuerpo.userData.arms as THREE.Object3D[];
         brazos[1].rotation.x = -1.3 - s.pitch;
         brazos[0].rotation.x = -1.1 - s.pitch;
-        m.fogonazo.visible = s.disparo < 0.05 && s.arma !== 'cuchillo';
+        m.fogonazo.visible = s.disparo < 0.05 && !esCuerpoACuerpo(s.arma);
       } else {
         // Cae de espaldas y se hunde en la nieve poco a poco.
         const k = Math.min(1, s.muerteT * 3);
@@ -342,16 +375,20 @@ export class Render3D {
       this.vista.add(arma);
       this.armaVista = j.arma;
     }
-    this.vista.visible = j.vivo && !p.zoom;
+    // Con la telescópica no se ve el arma; con la mira normal se centra (miras de hierro).
+    const telescopica = p.zoom && !!ARMAS[j.arma].zoom;
+    const ads = p.zoom && !telescopica;
+    this.vista.visible = j.vivo && !telescopica;
     if (j.moviendose && j.cuerpo.enSuelo) this.balanceo += dt * 9;
     const recarga = j.recargando > 0 ? Math.sin(Math.min(1, j.recargando) * Math.PI) : 0;
     const golpe = Math.max(0, 1 - j.disparo * 10);
-    const cuchillazo = j.arma === 'cuchillo' ? Math.max(0, 1 - j.disparo * 4) : 0;
-    this.vista.position.set(0.16 + Math.sin(this.balanceo) * 0.008, -0.15 + Math.abs(Math.cos(this.balanceo)) * 0.006 - recarga * 0.1, -0.32 + golpe * 0.03 - cuchillazo * 0.1);
+    const cuchillazo = esCuerpoACuerpo(j.arma) ? Math.max(0, 1 - j.disparo * 4) : 0;
+    if (ads) this.vista.position.set(0, -0.085 - recarga * 0.1, -0.26 + golpe * 0.02);
+    else this.vista.position.set(0.16 + Math.sin(this.balanceo) * 0.008, -0.15 + Math.abs(Math.cos(this.balanceo)) * 0.006 - recarga * 0.1, -0.32 + golpe * 0.03 - cuchillazo * 0.1);
     this.vista.rotation.set(golpe * 0.12 - recarga * 0.6, cuchillazo * 0.6, 0);
-    const fog = j.disparo < 0.05 && j.arma !== 'cuchillo' && j.vivo;
-    this.fogonazoVista.visible = fog && !p.zoom;
-    this.fogonazoVista.position.set(0.16, -0.13, j.arma === 'pistola' ? -0.47 : -0.62);
+    const fog = j.disparo < 0.05 && !esCuerpoACuerpo(j.arma) && j.vivo;
+    this.fogonazoVista.visible = fog && !telescopica;
+    this.fogonazoVista.position.set(ads ? 0 : 0.16, ads ? -0.07 : -0.13, j.arma === 'pistola' || j.arma === 'glock' ? -0.47 : -0.62);
     this.luzFogonazo.intensity = fog ? 6 : 0;
   }
 
