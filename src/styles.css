@@ -171,3 +171,14 @@ input[type='text'] { font: inherit; padding: 12px; border-radius: 10px; border: 
 body.jugando.espectando .espectador { display: flex; }
 .espectador .btn { min-width: 64px; min-height: 48px; font-size: 20px; }
 body.espectando .fuego { opacity: 0.25; }
+
+/* Horizontal por defecto: en el móvil en vertical, aviso para girarlo mientras se juega. */
+.girar { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  body.jugando .girar {
+    position: fixed; inset: 0; z-index: 50; display: grid; place-content: center; gap: 12px; padding: 24px;
+    background: #000; color: #fff; text-align: center; font-weight: 700;
+  }
+  .girar span { font-size: 64px; }
+  .girar p { margin: 0; font-size: 1.1em; }
+}
